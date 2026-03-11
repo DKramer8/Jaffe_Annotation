@@ -33,7 +33,7 @@ current_day = ''
 # Functions
 # ------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------
-def new_dictionaries():
+def new_dictionaries() ->  tuple[dict, dict, dict]:
     '''
         Helper function to easily create new empty dictionaries of the necessary format.
 
@@ -64,7 +64,12 @@ def new_dictionaries():
 
     return textRegion_dict, unknown_region_dict, final_regest_dict  
 
-def detect_page_from_filename(filename):
+def detect_page_from_filename(filename: str) -> str:
+    '''
+        Classifies the given file as left or right page by its name since even page numbers are always left page. Presumes that xml files must be named after its page number.
+        :param: filename: The name of the file to classify
+        :return: 'l' or 'r' for left or right page. In case of classification failure defaults to left page
+    '''
     match = re.search(r'page_(\d+)\.png', filename)
     if match:
         page_nr = int(match.group(1))
@@ -72,9 +77,10 @@ def detect_page_from_filename(filename):
             return 'l'
         else:
             return 'r'
-    return None
+    print(f'{filename}: Could not detect page side. Classifying with left page thresholds as default.')
+    return 'l'
 
-def add_coords_to_dict(dict, coords):
+def add_coords_to_dict(dict: dict, coords: dict) -> dict:
         '''
             Adds the given coords to the respective list of the given dictionary. Coords and dict does have specific conditions.
 
@@ -90,9 +96,9 @@ def add_coords_to_dict(dict, coords):
 
         return dict
 
-def classify_left_page_columns(scan, textRegion_dict, unknown_region_dict, final_regest_dict):
+def classify_left_page_columns(scan, textRegion_dict: dict, unknown_region_dict: dict, final_regest_dict: dict) ->  tuple[dict, dict, dict]:
     '''
-        Iterates through each region of the passed scan and tries to classify it based on the globally defined thresholds for left page. Page Number region doesnt get recognised because its only relevant for page side detection.
+        Iterates through each region of the passed scan and tries to classify it based on the globally defined thresholds for left page. Page Number region doesnt get recognised because its not relevant.
         Also makes basic classification of all lines from the table region filling the textRegion_dict with the coordinates of each line, its text and a basic classification of either on of the three columns ('date', 'place', 'regest_text')
 
         :param scan: A PageXMLScan object from the physical_document_model containing all relevant pagexml informations.
@@ -141,9 +147,9 @@ def classify_left_page_columns(scan, textRegion_dict, unknown_region_dict, final
 
     return textRegion_dict, unknown_region_dict, final_regest_dict
 
-def classify_right_page_columns(scan, textRegion_dict, unknown_region_dict, final_regest_dict):
+def classify_right_page_columns(scan, textRegion_dict: dict, unknown_region_dict: dict, final_regest_dict: dict) -> tuple[dict, dict, dict]:
     '''
-        Iterates through each region of the passed scan and tries to classify it based on the globally defined thresholds for right page. Page Number region doesnt get recognised because its only relevant for page side detection.
+        Iterates through each region of the passed scan and tries to classify it based on the globally defined thresholds for right page. Page Number region doesnt get recognised because its only relevant.
         Also makes basic classification of all lines from the table region filling the textRegion_dict with the coordinates of each line, its text and a basic classification of either on of the three columns ('date', 'place', 'regest_text')
 
         :param scan: A PageXMLScan object from the physical_document_model containing all relevant pagexml informations.
@@ -192,45 +198,58 @@ def classify_right_page_columns(scan, textRegion_dict, unknown_region_dict, fina
 
     return textRegion_dict, unknown_region_dict, final_regest_dict
 
-def detect_new_pope(df):
+def detect_new_pope(df: pd.DataFrame) -> pd.DataFrame:
     '''
-        Classifies all pope headers and the following pope unnecessary overview that are part of the third columns based on the their position in the middle of the column and the fact thath there is no date in the next line (in this case a new regest would start afterwards). 
+        Iterates through all lines of given DataFrame and detects those that belong to pope overview. Removes those detected lines and returns the cleaned DataFrame.
 
         :param: df: A Pandas DataFrame created from the textRegion_dict structure containing all lines of the table region.
         :return: The DataFrame without pope stuff
     '''
-    new_pope_idx = []
-    new_pope = False
+    drop_idxs = [] # Index of lines that get classified as belonging to pope overview get stored here
+    pope_overview = False
     is_next_date = False
     df_text = df[(df['type'] == 'regest_text')]
     x_min = df_text['x'].min()
     x_avg = df_text['x'].mean()    
     regestDate_threshold_max_x_Coord = x_min + x_avg*0.015    
-    for idx, row in df.iterrows():
+
+    # Iterate through all lines and check whether they belong to pope overview
+    for idx, row in df.iterrows(): 
         is_next_date = False
-        if idx > 0 and idx < len(df.index)-1:
+        if idx > 0 and idx < len(df.index)-1: # The used classification method needs to check lines before and after the current line. So we cant classify those lines here. For first line there is the method detect_first_line_pope_overview function
+
+            # Check whether next line is a date line
             if df.iloc[idx+1]['x'] < regestDate_threshold_max_x_Coord:
                 is_next_date = True
-            if new_pope == False:
+            
+            # Check if we currently are in a pope overviwew
+            if pope_overview == False:
                 y_distance = row['y'] - df.iloc[idx-1]['y']
-                if y_distance >= NEW_POPE_THRESHOLD_Y_COOD and is_next_date == False: # Current Row is a pope header and the next row isnt a date: Begin of unnecessary pope lines
-                    new_pope_idx.append(idx)
-                    new_pope = True
-                elif y_distance >= NEW_POPE_THRESHOLD_Y_COOD and is_next_date == True: # Pope header but next row is date: standard regests begin again
-                    new_pope_idx.append(idx)
+                if y_distance >= NEW_POPE_THRESHOLD_Y_COOD and is_next_date == False: 
+                    # Current Row is a pope header and the next row isnt a date -> Begin of pope overview
+                    drop_idxs.append(idx)
+                    pope_overview = True
+                elif y_distance >= NEW_POPE_THRESHOLD_Y_COOD and is_next_date == True: 
+                    # Pope overview, but next row is date: standard regests begin again
+                    drop_idxs.append(idx)   
+
             else:
-                # Classify as unnecessary pope line as long as no new date line begins
+                # Append current line to the list of lines that will get removed and check whether the pope overview section ends after this line (next line would be date line)
                 if is_next_date == True:
-                    new_pope = False
-                new_pope_idx.append(idx)
-        elif idx == len(df.index)-1 and new_pope == True:
-            new_pope_idx.append(idx)   
-    df = df.drop(index=new_pope_idx)
+                    pope_overview = False
+                drop_idxs.append(idx)
+
+        elif idx == len(df.index)-1 and pope_overview == True:
+            # There is no next line, but we are still in pope overview -> add line to remove list
+            drop_idxs.append(idx)   
+
+    # Remove those lines which got classified as belonging to pope overview
+    df = df.drop(index=drop_idxs)
     df = df.reset_index(drop=True)
 
     return df
 
-def detect_pope_overview(df):
+def detect_first_line_pope_overview(df: pd.DataFrame) -> pd.DataFrame:
     '''
     Detects whether the page started with a pope overview start that needs to get dropped and didnt get recognised in detect_new_pope()
 
@@ -293,7 +312,7 @@ def classify_regest_start(df):
 
     return df
 
-def classify_regest_date(df):
+def classify_textregion_date(df):
     '''
         Classifies all years headers that are part of the third columns of the indented lines (regest_start) based on the lines on the far left and the mean starting coordinate of all indented lines since they are even more far left than the regest start lines.
 
@@ -430,12 +449,13 @@ def append_place(dict, places, closest_regests, current_place, idx):
         dict['place'].append(place)
         current_place = place  
 
-def get_regest_number(txt):
+def get_regest_number(txt: str):
     '''
     Slices the given string so that the regest number at the start of the string gets seperated.
 
     :param: txt: The string to extract the regest number from
-    :return: The seperated regest number and the other text
+    :type:
+    :return: The seperated regest number or False if no number has been found and the remaining text
     '''
 
     nr_chars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '(', ' ']
@@ -480,7 +500,7 @@ def get_year(txt: str) -> str:
     Slices the given string so that the year at the start of the string gets seperated.
 
     :param: txt: The string to extract the year from
-    :type:
+    :type txt: str
     :return: The seperated year
     '''
 
@@ -581,7 +601,7 @@ def classify_lines_as_regest(df: pd.DataFrame, final_regest_dict: dict) -> tuple
 
     return df, final_regest_dict
 
-def classify(scan: pagexml.PageXMLScan) -> tuple[pd.DataFrame, pd.DataFrame]:
+def classify(scan) -> tuple[pd.DataFrame, pd.DataFrame]:
     '''
         Main classification function. Iterates through each region of the passed scan and manages classification of table region 
 
@@ -591,6 +611,7 @@ def classify(scan: pagexml.PageXMLScan) -> tuple[pd.DataFrame, pd.DataFrame]:
         :rtype: tuple[pd.DataFrame, pd.DataFrame]
     '''
 
+    # Get new dictionaries
     textRegion_dict, unknown_region_dict, final_regest_dict = new_dictionaries()
 
     # Classify basic regions header, date, place, text
@@ -599,20 +620,21 @@ def classify(scan: pagexml.PageXMLScan) -> tuple[pd.DataFrame, pd.DataFrame]:
         textRegion_dict, unknown_region_dict, final_regest_dict = classify_left_page_columns(scan, textRegion_dict, unknown_region_dict, final_regest_dict)
     elif page == 'r':
         textRegion_dict, unknown_region_dict, final_regest_dict = classify_right_page_columns(scan, textRegion_dict, unknown_region_dict, final_regest_dict)
-    else:
-        print(f'{scan.id}: Could not detect page side. Classifying with left page thresholds as default.')
-        textRegion_dict, unknown_region_dict, final_regest_dict = classify_left_page_columns(scan, textRegion_dict, unknown_region_dict, final_regest_dict)
 
+    # Data cleansing and preparation for more detailed classification
     df = pd.DataFrame(textRegion_dict)
     df = df.sort_values('y')
     df = df.reset_index(drop=True)
     df['text'] = df['text'].fillna(' ')
     df = detect_new_pope(df)
-    df = detect_pope_overview(df)
+    df = detect_first_line_pope_overview(df)
     df = drop_unnecessary(df)
+
+    # Detailed classification of the text region lines
     df = classify_regest_start(df)  
-    df = classify_regest_date(df)
+    df = classify_textregion_date(df)
     
+    # Combine lines into whole regests
     df, final_regest_dict = classify_lines_as_regest(df, final_regest_dict)
 
     i = 0
@@ -624,17 +646,14 @@ def classify(scan: pagexml.PageXMLScan) -> tuple[pd.DataFrame, pd.DataFrame]:
                 final_regest_dict['pope'].append(final_regest_dict['pope'][0])
         i += 1
 
-    # Länge aller Listen im final_regest_dict herausfinden
+    # In case of classification problems atleast append an empty string and get all lists to the same length to prevent export problems
     max_len = max(len(lst) for lst in final_regest_dict.values())
-
-    # Alle Listen auf gleiche Länge auffüllen
     for key, lst in final_regest_dict.items():
         while len(lst) < max_len:
             if key == 'pope':
-                # falls pope-Liste leer ist, fülle mit leerem String oder ersten Pope
                 lst.append(lst[0] if lst else '')
             else:
-                lst.append('')  # leere Strings für date, place, number, text
+                lst.append('')
 
     final_df = pd.DataFrame(final_regest_dict)
 
