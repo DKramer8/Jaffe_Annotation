@@ -1,2 +1,2 @@
 # Jaffe_Annotation_Basic
-Basic annotation of PageXML extracted from Philipp Jaffé Regesta pontificum romanorum (1885).
+Repository for automatic annotation of PageXML transcriptions of Philipp Jaffés *Regesta pontificum romanorum : ab condita ecclesia ad annum post Christum natum MCXCVIII*
