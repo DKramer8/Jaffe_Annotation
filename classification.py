@@ -70,13 +70,15 @@ def detect_page_from_filename(filename: str) -> str:
         :param: filename: The name of the file to classify
         :return: 'l' or 'r' for left or right page. In case of classification failure defaults to left page
     '''
-    match = re.search(r'page_(\d+)\.png', filename)
+    match = re.search(r'.*(\d+)\.png', filename)
+    
     if match:
         page_nr = int(match.group(1))
         if page_nr % 2 == 0:
             return 'l'
         else:
             return 'r'
+        
     print(f'{filename}: Could not detect page side. Classifying with left page thresholds as default.')
     return 'l'
 
@@ -198,7 +200,7 @@ def classify_right_page_columns(scan, textRegion_dict: dict, unknown_region_dict
 
     return textRegion_dict, unknown_region_dict, final_regest_dict
 
-def detect_new_pope(df: pd.DataFrame) -> pd.DataFrame:
+def remove_pope_overview(df: pd.DataFrame) -> pd.DataFrame:
     '''
         Iterates through all lines of given DataFrame and detects those that belong to pope overview. Removes those detected lines and returns the cleaned DataFrame.
 
@@ -216,7 +218,7 @@ def detect_new_pope(df: pd.DataFrame) -> pd.DataFrame:
     # Iterate through all lines and check whether they belong to pope overview
     for idx, row in df.iterrows(): 
         is_next_date = False
-        if idx > 0 and idx < len(df.index)-1: # The used classification method needs to check lines before and after the current line. So we cant classify those lines here. For first line there is the method detect_first_line_pope_overview function
+        if idx > 0 and idx < len(df.index)-1: # The used classification method needs to check lines before and after the current line. So we cant classify those lines here. For first line there is the method remove_first_line_pope_overview function
 
             # Check whether next line is a date line
             if df.iloc[idx+1]['x'] < regestDate_threshold_max_x_Coord:
@@ -249,9 +251,9 @@ def detect_new_pope(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def detect_first_line_pope_overview(df: pd.DataFrame) -> pd.DataFrame:
+def remove_first_line_pope_overview(df: pd.DataFrame) -> pd.DataFrame:
     '''
-    Detects whether the page started with a pope overview start that needs to get dropped and didnt get recognised in detect_new_pope()
+    Detects whether the page started with a pope overview start that needs to get dropped and didnt get recognised in remove_pope_overview()
 
     :param: df: The dataframe to check
     :return: The Pandas DataFrame without pope overview
@@ -264,7 +266,7 @@ def detect_first_line_pope_overview(df: pd.DataFrame) -> pd.DataFrame:
     regestDate_threshold_max_x_Coord = x_min + x_avg*0.015
     for idx, row in df.iterrows():
         if idx == 0:
-            if row['type'] == 'regest_text': # Normal regest pages always start with a date. Otherwise ist part of pope overview that startet on previous page, so it didnt get recognised in detect_new_pope()
+            if row['type'] == 'regest_text': # Normal regest pages always start with a date. Otherwise ist part of pope overview that startet on previous page, so it didnt get recognised in remove_pope_overview()
                 new_pope_overview = True
         if df.iloc[idx]['x'] >= regestDate_threshold_max_x_Coord and new_pope_overview == True:
             drop_idx.append(idx)
@@ -275,25 +277,25 @@ def detect_first_line_pope_overview(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-def drop_unnecessary(df):
+def remove_bottom_line(df: pd.DataFrame) -> pd.DataFrame:
     '''
-        Detects lines that are unnecessary for regest classification and dont contain necessary information.
+        Detects the lines beneath the table region which dont contain necessary information and removes them.
 
         :param: df: The Pandas DataFrame to drop the unnecessary lines from
         :return: The passed DataFrame without unnecessary lines
     '''
     drop_idx = []
     for idx, row in df.iterrows():
-        if row['type'] == 'date' and row['h'] < 130 and row['w'] > 500: # Sometimes there is a text at the bottom of date column which doesnt contain relevant information.
+        if row['type'] == 'date' and row['h'] < 130 and row['w'] > 500: # Text at the bottom of date column
             drop_idx.append(idx)
-        if row['type'] == 'regest_text' and row['x'] > 2300 and row['y'] > 3450 and row['w'] < 100: # Sometimes there are numbers at the bottom right corner that are not needed.
+        if row['type'] == 'regest_text' and row['x'] > 2300 and row['y'] > 3450 and row['w'] < 100: # Numbers at the bottom right corner
             drop_idx.append(idx)
     df = df.drop(index=drop_idx)
     df = df.reset_index(drop=True)
 
     return df
 
-def classify_regest_start(df):
+def classify_regest_start(df: pd.DataFrame) -> pd.DataFrame:
     '''
         Classifies all indented lines (regest_start) of the third column (regest_text) based on the lines on the far left and the mean starting coordinate of all lines.
 
@@ -301,26 +303,27 @@ def classify_regest_start(df):
         :return: df
     '''
 
-    regest_df = df[(df['type'] == 'regest_text')] # Only get lines of third column
+    regest_df = df[(df['type'] == 'regest_text')] # Only get lines of the table regions third column
     x_min = regest_df['x'].min()
     x_avg = regest_df['x'].mean()
     x_max = regest_df['x'].max()
-    regestStart_threshold_max_x_Coord = x_min + x_avg*0.07 # The rows on the far left, including some space if the rows as a whole are moved slightly to the right over time
+    regestStart_threshold_max_x_Coord = x_min + x_avg*0.07 
     for idx, row in df.iterrows():
+        # All rows on the far left (including some space if the rows as a whole are moved slightly to the right over time) get classified as the beginning of a new regest
         if row['type'] == 'regest_text' and row['x'] < regestStart_threshold_max_x_Coord and row['x'] != x_max:            
             df.at[idx, 'type'] = 'regest_start'
 
     return df
 
-def classify_textregion_date(df):
+def classify_textregion_date(df: pd.DataFrame) -> pd.DataFrame:
     '''
-        Classifies all years headers that are part of the third columns of the indented lines (regest_start) based on the lines on the far left and the mean starting coordinate of all indented lines since they are even more far left than the regest start lines.
+        Detects those lines that are part of the table regions third column (text column) and indicate the start of a new year
 
         :param: df: A Pandas DataFrame created from the textRegion_dict structure containing all lines of the table region.
         :return: df
     '''
 
-    regest_df = df[(df['type'] == 'regest_start')] # Only get rows tha are indented
+    regest_df = df[(df['type'] == 'regest_start')] # Only get lines that are indented and beacuase of that got recognized as regest start previously
     x_min = regest_df['x'].min()
     x_avg = regest_df['x'].mean()
     w_avg = regest_df['w'].mean()
@@ -329,14 +332,17 @@ def classify_textregion_date(df):
     regestDate_threshold_max_x_Coord = x_min + x_avg*0.015
     regestDate_threshold_max_w_Coord = x_avg + w_avg - w_avg*0.025
     regestDate_threshold_min_h_Coord = h_max - h_avg*0.075
+
     for idx, row in df.iterrows():
-        if row['type'] == 'regest_start' and row['x'] < regestDate_threshold_max_x_Coord and row['text'][0] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] : # The rows on the far left, including some space if the rows as a whole are moved slightly to the right over time
-            if row['w'] < regestDate_threshold_max_w_Coord or row['h'] > regestDate_threshold_min_h_Coord: # The rows dont spread over the whole distance and are a little bit higher than other indented lines
+        if row['type'] == 'regest_start' and row['x'] < regestDate_threshold_max_x_Coord and row['text'][0] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] :
+            # Even in regard to all regest_start lines these lines are even more on the far left (including some space if the lines as a whole are moved slightly to the right over time) and must start with an integer
+            if row['w'] < regestDate_threshold_max_w_Coord or row['h'] > regestDate_threshold_min_h_Coord:
+                # Also these lines dont spread over the whole horizontal distance and are a little bit higher than other indented lines
                 df.at[idx, 'type'] = 'regest_date'
 
     return df  
 
-def get_closest_regest(df, df_regest_start, type):
+def get_closest_regest(df: pd.DataFrame, df_regest_start: pd.DataFrame, type: str) -> list:
     '''
     Creates a list containing the idx of each row in df and idx of the closest regest starting line  to that row (of df). If two rows have the same closest starting regest, pop the last one as it is most propablly something unnecessary in that case.
 
@@ -350,29 +356,39 @@ def get_closest_regest(df, df_regest_start, type):
     for idx, line in df.iterrows():
         min_distance = 9999999
         min_regest_idx = 0
+
         for regest_idx, regest_line in df_regest_start.iterrows():
+            # Get the lines minimum distance to the closest regest_start
             if abs(regest_line['y'] - line['y']) < min_distance:
                 min_distance = abs(regest_line['y'] - line['y'])
                 min_regest_idx = regest_idx
+
         if len(closest_regest) > 0:
-            if closest_regest[-1][1] == min_regest_idx and type == 'date': # Many pages have an unnecessary text at the bottom left that gets classified as date. So if the last two date have the same closest neighbour, remove the last one as it is most propably the unnecassary text              
+            if closest_regest[-1][1] == min_regest_idx and type == 'date':
+                # Many pages have an unnecessary text at the bottom left that gets classified as date. So if the last two date have the same closest neighbour, remove the last one as it is most propably the unnecassary text
                 if closest_regest[-1][2] >= min_distance:
                     closest_regest.pop()
                     closest_regest.append([idx, min_regest_idx, min_distance])
+
             else:
                 closest_regest.append([idx, min_regest_idx, min_distance])
         else:
             closest_regest.append([idx, min_regest_idx, min_distance])
+
     return closest_regest
 
-def merge_to_string(l):
+def merge_to_string(l: list) -> str:
     '''
-        Merges all strings of passed list and returns them
+        Merges all strings of passed list and returns them as a string.
+
+        :param: l: The list of strings which should get merged
+        :return: The merged string
     '''
     text = []
     for i, line in enumerate(l):
         if line is not None:
-            if line.endswith('-'): # in case that line ends with unfinished word
+            if line.endswith('-'):
+                # In case that line ends with unfinished word we need to merge it with the rest of the word
                 if i + 1 < len(l):
                     l[i + 1] = line[:-1] + l[i + 1]
             else:
@@ -380,22 +396,33 @@ def merge_to_string(l):
     result = ' '.join(text)
     return result
 
-def get_full_date(dates, closest_regests, current_year, idx):
+def get_full_date(dates: pd.DataFrame, closest_regests: list, current_year: str, idx: int) -> str:
     '''
-        Detects closest date for regest and appends it to the passed dict.
+        Merges all information regarding the regest date (closest date line, current year, date column) together into a string containing year month and day.
+
+        :param: dates: A DataFrame containing all date line of the tables first column
+        :param: closest_regests: A list of tuples linking each regest text line to its closest date line
+        :param: current_year: The last year that got detected
+        :param: idx: The index of the current line
+        :return: The merged date string containing year, month and day
     '''
     full_date = current_year
     global current_month
     global current_day
+
     for i in closest_regests:
         if i[1] == idx:
             if dates.loc[i[0]]['text'] is not None:
                 month_day = dates.loc[i[0]]['text']
+
+                # Split month and day by whitespace if possible
                 try:
                     month, day = month_day.split(' ', 1)
                 except:
                     month = ' '
                     day = ' '
+
+                # If there is a " in month or day get the last month/day. Also add brackets if some got transcribed
                 if '(„)' in month or '(„' in month or '„)' in month:
                     month = '(' + current_month + ')'
                     full_date += ' ' + month
@@ -404,7 +431,6 @@ def get_full_date(dates, closest_regests, current_year, idx):
                 else:
                     current_month = month
                     full_date += ' ' + month
-
                 if '(„)' in day or '(„' in day or '„)' in day:
                     day = '(' + current_day + ')'
                     full_date += ' ' + day
@@ -412,15 +438,22 @@ def get_full_date(dates, closest_regests, current_year, idx):
                     full_date += ' ' + current_day
                 else:
                     current_day = day
-                    full_date += ' ' + day                        
+                    full_date += ' ' + day   
+
             else:
                 full_date += ' '
 
     return full_date
 
-def append_place(dict, places, closest_regests, current_place, idx):
+def append_place(dict: dict, places: pd.DataFrame, closest_regests: list, current_place: str, idx: int):
     '''
-        Detects closest place for regest and appends it to the passed dict.
+        Detects the closest place for regest and appends it to the passed dict at the corresponding position
+
+        :param: dict: The dictionary in which the places get added
+        :param: places: The DataFrame containing all the places of the second column
+        :param: closest_regests: The list linking each place line to the closest regest line
+        :param: current_place: The last detected place
+        :param: idx: The index of the current line 
     '''
 
     place = ' '
@@ -428,7 +461,9 @@ def append_place(dict, places, closest_regests, current_place, idx):
         if i[1] == idx:
             if places.loc[i[0]]['text'] is not None:
                 place = places.loc[i[0]]['text']
+
     if not any(char.isalpha() for char in place):
+
         if current_place != '':
             if '(„)' in place or '(„' in place or '„)' in place:
                 place = '(' + current_place + ')'
@@ -445,16 +480,16 @@ def append_place(dict, places, closest_regests, current_place, idx):
                 dict['place'].append('prev_regest')
             else:
                 dict['place'].append(' ')
+
     else:
         dict['place'].append(place)
         current_place = place  
 
-def get_regest_number(txt: str):
+def get_regest_number(txt: str) -> tuple[str, str]:
     '''
     Slices the given string so that the regest number at the start of the string gets seperated.
 
     :param: txt: The string to extract the regest number from
-    :type:
     :return: The seperated regest number or False if no number has been found and the remaining text
     '''
 
@@ -462,6 +497,8 @@ def get_regest_number(txt: str):
     slice_idx = 0
     if txt is not None:
         for idx, char in enumerate(txt):
+            # Try to get the position at which the number can get cut of
+
             if char in nr_chars:
                 pass
             else:
@@ -478,6 +515,7 @@ def get_regest_number(txt: str):
                     else:
                         slice_idx = idx+1
                     break
+
         regest_nr = txt[:slice_idx]
         txt = txt[slice_idx:]
         if len(txt) > 0:
@@ -504,7 +542,7 @@ def get_year(txt: str) -> str:
     :return: The seperated year
     '''
 
-    year_chars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '?', '—', '-', ' ']
+    year_chars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '?', '—', '-', ' '] # The first char which isnt one of these is actually the end of the year
     slice_idx = len(txt)
     for idx, char in enumerate(txt):
         if char in year_chars:
@@ -528,20 +566,23 @@ def classify_lines_as_regest(df: pd.DataFrame, final_regest_dict: dict) -> tuple
         :rtype: tuple[pd.DataFrame, dict]
     '''
 
-    current_year = ''
-    current_place = ''
-    regest_full_text = []
+    current_year = '' # We need to remeber the last mentioned year
+    current_place = '' # We need to remember the last mentioned place
+    regest_full_text = [] # A list to store the text of all lines belonging to the same regest
     first_regest = True
     df_regest_start = df[(df['type'] == 'regest_start')]
     df_date = df[(df['type'] == 'date')]
     df_place = df[(df['type'] == 'place')]
+
     date_closest_regest = get_closest_regest(df_date, df_regest_start, 'date')
     place_closest_regest = get_closest_regest(df_place, df_regest_start, 'place')
 
-    for idx, row in df.iterrows(): # Iterate through all lines
+    for idx, row in df.iterrows():
+
         if row['type'] == 'regest_date': 
-            # Get the current year as it is'nt a part of the date column due to Jaffé Layout
+            # Get the current year as it isnt a part of the date column due to Jaffé Layout
             current_year = get_year(row['text'])
+
         elif row['type'] == 'regest_start':
             # Line is start of a new regest
             if first_regest == False:
@@ -586,6 +627,7 @@ def classify_lines_as_regest(df: pd.DataFrame, final_regest_dict: dict) -> tuple
             # Line is simple text, so just append the lines text to the regests full text list and proceed with next line
             if row['text'] is not None:
                 regest_full_text.append(row['text'])
+
         elif row['type'] == 'regest_text' and first_regest == True:
             # Line ist simple text but start of its regest is on previous page, so fill the regests full text list 
             # but also insert placeholder 'prev_page' into final_regest_dict date, place and number
@@ -626,9 +668,9 @@ def classify(scan) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.sort_values('y')
     df = df.reset_index(drop=True)
     df['text'] = df['text'].fillna(' ')
-    df = detect_new_pope(df)
-    df = detect_first_line_pope_overview(df)
-    df = drop_unnecessary(df)
+    df = remove_pope_overview(df)
+    df = remove_first_line_pope_overview(df)
+    df = remove_bottom_line(df)
 
     # Detailed classification of the text region lines
     df = classify_regest_start(df)  

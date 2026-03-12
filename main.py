@@ -97,6 +97,47 @@ def plot_text_regions(df: pd.DataFrame):
     plt.axis('off')
     plt.show()          
 
+def find_incipit(df: pd.DataFrame) -> pd.DataFrame:
+    '''
+        Slices the regest text at the position of '-' char and puts all text behind that as incipit into the df
+
+        :param: df: The comlpete DataFrame to search for incipits
+        :return: The DateFrame including the detected incipits
+    '''
+
+    incipits = []
+    texts = []
+    slice_idx = False
+    for idx, regest in df.iterrows():
+        txt = regest['text']
+
+        # Juste get the last 75 chars of regest text since the '-' char could appear before
+        if len(txt) > 75:
+            max_chars = len(txt) - 75
+        else:
+            max_chars = len(txt)
+
+        # Find '-' char position to slice of incipit afterwards
+        for idx, char in enumerate(txt):
+            if idx > max_chars:
+                if char == '—':
+                    slice_idx = idx
+
+        # Slice incpit if '-' char has been found
+        if slice_idx != False:
+            incipit = txt[slice_idx+2:]
+            only_txt = txt[:slice_idx-1:]
+            incipits.append(incipit)
+            texts.append(only_txt)
+        else:
+            incipits.append('')
+            texts.append(txt)
+
+    df['incipit'] = incipits
+    df['text'] = texts
+
+    return df
+
 def combine_regests(df: pd.DataFrame) -> pd.DataFrame:
     '''
         Deletes all lines categorised as belonging to the previous page and adds their text to previous line text. Also detects all regest thats places are categorised to be the same as previous places regest
@@ -107,36 +148,9 @@ def combine_regests(df: pd.DataFrame) -> pd.DataFrame:
         :rtype: pd.DataFrame
     '''
 
-    def find_incipit(df):
-        incipits = []
-        texts = []
-        slice_idx = False
-        for idx, regest in df.iterrows():
-            txt = regest['text']
-            if len(txt) > 75:
-                max_chars = len(txt) - 75
-            else:
-                max_chars = len(txt)
 
-            for idx, char in enumerate(txt):
-                if idx > max_chars:
-                    if char == '—':
-                        slice_idx = idx
 
-            if slice_idx != False:
-                incipit = txt[slice_idx+2:]
-                only_txt = txt[:slice_idx-1:]
-                incipits.append(incipit)
-                texts.append(only_txt)
-            else:
-                incipits.append('')
-                texts.append(txt)
-        df['incipit'] = incipits
-        df['text'] = texts
-
-        return df
-
-    # Merge text
+    # Merge text of regests that span over two pages
     drop_idx = []
     for idx, row in df.iterrows():
         if row['date'] == 'prev_page' and row['place'] == 'prev_page' and row['number'] == 'prev_page':
@@ -241,7 +255,7 @@ if input_type == 'single': # Single page classification
 
 elif input_type == 'zip': # Zip archive classification
     # Enter file name
-    print('Please enter zip archive name (Must end in .zip)')
+    ('Please enter zip archive name (Must end in .zip)')
     file_name = input()
     zip_file = INPUT_PATH + '\\' + file_name
     if os.path.exists(zip_file) != True:

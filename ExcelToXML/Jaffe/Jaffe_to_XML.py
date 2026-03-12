@@ -1,12 +1,23 @@
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+# Imports
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
 from lxml import etree
 import pandas as pd
 import re
 import calendar
 from datetime import datetime
 
-INPUT_PATH = "input/Jaffe_Korrekturdatei_I_komplett.xlsx"
-#INPUT_PATH = "input/jaffe_test.xlsx"
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+# Globals
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+INPUT_PATH = "ExcelToXML/Jaffe/input/Jaffe_Korrekturdatei_I_komplett.xlsx"
 OUTPUT_FOLDER = "output"
+
+# A dictionary mapping excel columns and its corresponding xml elements
 COLUMNS_XML_MAP = { # "excel_column": "xml" 
     "pope": "legal_actor_issuer_inner",
     # year, month, date sind Sonderfälle
@@ -19,6 +30,7 @@ COLUMNS_XML_MAP = { # "excel_column": "xml"
     "editions": "editions_list_bibl",
     "decretals": "decretals_list_bibl",
 }
+# A dictionary mapping xml elements and its standard content
 XML_CONTENT_MAP = { # "xml": "content"
     "title": "[Die Nummer des Regests im Projekt]",
     "resp1": "Ursprünglicher Bearbeiter/Bearbeiter Datenquelle",
@@ -50,6 +62,7 @@ XML_CONTENT_MAP = { # "xml": "content"
     "archival_history_bibl": "[Weitere Referenzen als listBibl]",
     "notes_p": "[Anmerkungen, Notizen und Fragen der Bearbeiter*in.]",
 }
+
 MONTH_DICT = {
     'januar': '01', 'janr': '01', 'ianuar': '01', 'ianr': '01',
     'februar': '02',
@@ -65,57 +78,86 @@ MONTH_DICT = {
     'december': '12', 'dezember': '12'
 }
 
-def build_date(year, month, day, xml_content_map_instance, id):
-    def check_for_timespan(date_value):  
-        date_value = str(date_value)
-        if year == "": # No entry
-            first, last = "", ""
-        elif any(c in date_value for c in ["-", "—","–", "/"]): # Timespan divided by "-" or "—" or "–" or "/"
-            parts = re.split(r"[-—–/]", date_value, maxsplit=1)
-            first, last = parts[0], parts[1]
-        elif re.search(r"(?<=\d)\s(?=\d)|(?<!\d)\s(?!\d)|(?<=\d\.)\s(?=\d)|(?<=\D\.)\s(?=\D)", date_value): # Timespan divided by whitespace
-            parts = re.split(r"\s", date_value, maxsplit=1)
-            first, last = parts[0], parts[1]
-        else: # No timespan
-            first, last = date_value, date_value
-        
-        return first, last    
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+# Functions
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+def get_month_digits(month_str: str) -> str:
+    """
+    Converts a month name or abbreviation to its corresponding digits.
+    Args:
+        month_str (str): The name or abbreviation of the month (e.g., "January", "Jan", "Feb").
+    Returns:
+        int: The digits corresponding to the month (01 for January, 02 for February, etc.),
+        None if the input does not match any month in the MONTH_DICT.
+    """
     
-    def get_month_digits(month_str):
-        """
-        Converts a month name or abbreviation to its corresponding digits.
-        Args:
-            month_str (str): The name or abbreviation of the month (e.g., "January", "Jan", "Feb").
-        Returns:
-            int: The digits corresponding to the month (01 for January, 02 for February, etc.),
-            None if the input does not match any month in the MONTH_DICT.
-        """
-        
-        for key, value in MONTH_DICT.items():
-            if re.search(month_str.lower(), key):
-                return value
-        return ""     
+    for key, value in MONTH_DICT.items():
+        if re.search(month_str.lower(), key):
+            return value
+    return "" 
 
+def check_for_timespan(date_value: str, year: str) -> tuple[str, str]:  
+    '''
+        Checks the passed date_value string for a possible timespan returns either both timespan components or just the passed date_value.
+
+        :param: date_value: The string which gets checked
+        :return: First and last date of timespan or date_value if no timespan got detected
+    '''
+    date_value = str(date_value)
+    if year == "": 
+        # No entry
+        first, last = "", ""
+
+    elif any(c in date_value for c in ["-", "—","–", "/"]): 
+        # Timespan detected because of '-' similar char
+        parts = re.split(r"[-—–/]", date_value, maxsplit=1)
+        first, last = parts[0], parts[1]
+
+    elif re.search(r"(?<=\d)\s(?=\d)|(?<!\d)\s(?!\d)|(?<=\d\.)\s(?=\d)|(?<=\D\.)\s(?=\D)", date_value): 
+        # Timespan detecteed because of whitespace
+        parts = re.split(r"\s", date_value, maxsplit=1)
+        first, last = parts[0], parts[1]
+
+    else: 
+        # No timespan
+        first, last = date_value, date_value
+    
+    return first, last
+
+def build_date(year: str, month: str, day: str, xml_content_map_instance: dict, id: str):
+    '''
+        Inlucdes correct date content into xml_content_map_instance including correct notBefore/notAfters attributes
+
+        :param: year: Year or year range string string
+        :param: month: Month or month range string
+        :param: day: Day or day range string
+        :param: xml_content_map_instance: The instance of the xml_content_map dict in which the dates get inserted
+        :param: id: The lfdnr of the current row for debugging purposes
+    '''
     year = "" if pd.isna(year) else str(year)
     month = "" if pd.isna(month) else str(month)
     day = "" if pd.isna(day) else str(day)
 
+    # Build date element content
     xml_content_map_instance["date"] = f"{day.replace('[', '(').replace(']', ')')} {month} {year}"
 
-    firstYear, lastYear = check_for_timespan(year)
+    # Detect timespan for year, month and date to prepare notBefore/notAfter attributes
+    firstYear, lastYear = check_for_timespan(year, year)
     if firstYear == "" or lastYear == "":
         firstYear, lastYear = "1159", "1181"
     else:
         firstYear, lastYear = re.sub(r"\D", "", firstYear), re.sub(r"\D", "", lastYear) # Remove non-digit characters
 
-    firstMonth, lastMonth = check_for_timespan(month)
+    firstMonth, lastMonth = check_for_timespan(month, year)
     firstMonth, lastMonth = re.sub(r"[^a-zA-ZäöüÄÖÜß]", "", firstMonth), re.sub(r"[^a-zA-ZäöüÄÖÜß]", "", lastMonth) # Remove non-alphabetic characters
     if firstMonth != "" or lastMonth != "":
         firstMonth, lastMonth = get_month_digits(firstMonth), get_month_digits(lastMonth)
     else:
         firstMonth, lastMonth = "01", "12" # If month is not found -> get full year timespan
 
-    firstDay, lastDay = check_for_timespan(day)
+    firstDay, lastDay = check_for_timespan(day, year)
     firstDay, lastDay = re.sub(r'\D', '', firstDay), re.sub(r'\D', '', lastDay) # Remove non-digit characters
     firstDay, lastDay = firstDay.zfill(2), lastDay.zfill(2) # Ensure two digits for day
     if firstDay == '00': # Happens if day is not found
@@ -126,6 +168,7 @@ def build_date(year, month, day, xml_content_map_instance, id):
         except ValueError as e:
             print(f'{id}, {year}.{month}.{day}: Cant get first and last day of month: {e}')    
 
+    # Build date notBefore/notAfter attributes if possible
     try:
         notBefore = f"{firstYear}-{firstMonth}-{firstDay}"
         datetime.strptime(notBefore, "%Y-%m-%d")
@@ -136,10 +179,17 @@ def build_date(year, month, day, xml_content_map_instance, id):
         notBefore, notAfter = None, None
         return
 
-    xml_content_map_instance["date_notBefore"] = notBefore
+    # Insert otBefore/notAfter values into xml_content_map instance
+    xml_content_map_instance["date_notBefore"] = notBefore 
     xml_content_map_instance["date_notAfter"] = notAfter
 
-def create_tei_xml(output_file, lfdN):
+def create_tei_xml(output_file: str, lfdN: str):
+    '''
+        Builds the final xml output file based on the xml_content_map_instance content
+
+        :param: output_file: The output filename
+        :param: lfdN: The id
+    '''
     # Define namespaces
     namespaces = {
         None: "http://www.tei-c.org/ns/1.0",
@@ -318,22 +368,33 @@ def create_tei_xml(output_file, lfdN):
         f.write(b'<?xml-model href="https://raw.githubusercontent.com/cceh/FormierungEuropas/refs/heads/main/CEI_TEI_Schema/tei_cei_formierung_edited.rng" type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n')
         f.write(b'<?xml-stylesheet type="text/css" href="https://raw.githubusercontent.com/hannahbusch/Formierung_Europas_wip/master/style.css"?>\n')
         f.write(etree.tostring(tei, pretty_print=True, xml_declaration=False, encoding="UTF-8"))
+    print(f"XML-Datei wurde erstellt: {output_file}")
 
-df = pd.read_excel(INPUT_PATH, header=0, dtype=str)
-for _, row in df.iterrows():
-    id = row["LfdNrFinal"]
-    xml_content_map_instance = XML_CONTENT_MAP.copy()
-    for col, value in row.items():
-        if col in COLUMNS_XML_MAP and str(value) != "nan" and value is not None and not pd.isna(value):
-            try:
-                xml_content_map_instance[COLUMNS_XML_MAP[col]] = value
-            except:
-                print(f"{id}: Spalte '{col}' nicht in xml_content_map_instance gefunden.")
-    output_file = f"{OUTPUT_FOLDER}/Jaffe_{id}.xml"
-    build_date(row["year"], row["month"], row["day"], xml_content_map_instance, id)
-    create_tei_xml(output_file, id)
-    #print(f"XML-Datei wurde erstellt: {output_file}")
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+if __name__ == '__main__':
+    df = pd.read_excel(INPUT_PATH, header=0, dtype=str)
 
-#output_file = f"{OUTPUT_FOLDER}/Jaffe_{id}.xml"
-#create_tei_xml(output_file)
-#print(f"XML-Datei wurde erstellt: {output_file}")
+    # Create seperate xml file for each regest
+    for _, row in df.iterrows():
+        id = row["LfdNrFinal"]
+        xml_content_map_instance = XML_CONTENT_MAP.copy() # Create an instance of xml_content_map to replace its values with the excel content
+
+        for col, value in row.items():
+
+            if col in COLUMNS_XML_MAP and str(value) != "nan" and value is not None and not pd.isna(value):
+                # If the excel column is in the columns_xml_map replace this rows value in the xml_content_map instance
+                try:
+                    xml_content_map_instance[COLUMNS_XML_MAP[col]] = value
+                except:
+                    print(f"{id}: Spalte '{col}' nicht in xml_content_map_instance gefunden.")
+
+        # Build date element content and attributes since it is slightly more comlicated than other elements
+        build_date(row["year"], row["month"], row["day"], xml_content_map_instance, id)
+
+        # Create actual xml output file from the xml_content_map instance
+        output_file = f"{OUTPUT_FOLDER}/Jaffe_{id}.xml"
+        create_tei_xml(output_file, id)
