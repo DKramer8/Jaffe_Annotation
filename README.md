@@ -5,7 +5,7 @@ Transcription has been done with eScriptorium. You can find the finetuned segmen
 
 ### Annotation
 Main file is for annotation handling. It classifies pope, date, place, jaffé number, regest text, and incipit for each regest. 
-Input files must be either single PageXML files or zip archives of PageXML files. Input files must be located in *date/input* folder and should contain the jaffe page number in its names (which is standard for eScriptorium PageXML export).
+Input files must be either single PageXML files or zip archives of PageXML files. Input files must be located in *data/input* folder and should contain the jaffe page number in its names (which is standard for eScriptorium PageXML export).
 Possible output formats are tsv, csv, excel, xml (either as one file or one file for each regest).
 
 ### Postprocessing
