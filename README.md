@@ -1,4 +1,4 @@
-# Jaffe_Annotation_Basic
+# Jaffe_Annotation
 Repository for automatic annotation and postprocessing of PageXML transcriptions of Philipp Jaffés *Regesta pontificum romanorum : ab condita ecclesia ad annum post Christum natum MCXCVIII.*. 
 Transcription has been done with eScriptorium. You can find the finetuned segmentation and transcription models in the *models* folder.
 
