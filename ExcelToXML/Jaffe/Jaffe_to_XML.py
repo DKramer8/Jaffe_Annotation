@@ -30,8 +30,8 @@ COLUMNS_XML_MAP = { # "excel_column": "xml"
     "editions": "editions_list_bibl",
     "decretals": "decretals_list_bibl",
 }
-# A dictionary mapping xml elements and its standard content
-XML_CONTENT_MAP = { # "xml": "content"
+# A dictionary mapping xml elements and its default content
+XML_DEFAULT_CONTENT_MAP = { # "xml": "content"
     "title": "[Die Nummer des Regests im Projekt]",
     "resp1": "Ursprünglicher Bearbeiter/Bearbeiter Datenquelle",
     "pers_name1": "[Vorname und Nachname der Bearbeiter*in]",
@@ -222,8 +222,8 @@ def create_tei_xml(output_file: str, lfdN: str):
     publisher = etree.SubElement(publication_stmt, "publisher")
     publisher.text = str(xml_content_map_instance["publisher"])
     idno = etree.SubElement(publication_stmt, "idno")
-    if str(xml_content_map_instance["bibl_jaffe"]) != str(XML_CONTENT_MAP["bibl_jaffe"]):
-        if str(xml_content_map_instance["bibl_jaffe_alt"]) != str(XML_CONTENT_MAP["bibl_jaffe_alt"]):
+    if str(xml_content_map_instance["bibl_jaffe"]) != str(XML_DEFAULT_CONTENT_MAP["bibl_jaffe"]):
+        if str(xml_content_map_instance["bibl_jaffe_alt"]) != str(XML_DEFAULT_CONTENT_MAP["bibl_jaffe_alt"]):
             idno_text = f'{str(xml_content_map_instance["bibl_jaffe"])}_{lfdN}_{str(xml_content_map_instance["bibl_jaffe_alt"])}'
         else:
             idno_text = f'{str(xml_content_map_instance["bibl_jaffe"])}_{lfdN}'
@@ -381,7 +381,7 @@ if __name__ == '__main__':
     # Create seperate xml file for each regest
     for _, row in df.iterrows():
         id = row["LfdNrFinal"]
-        xml_content_map_instance = XML_CONTENT_MAP.copy() # Create an instance of xml_content_map to replace its values with the excel content
+        xml_content_map_instance = XML_DEFAULT_CONTENT_MAP.copy() # Create an instance of xml_content_map to replace its values with the excel content
 
         for col, value in row.items():
 
